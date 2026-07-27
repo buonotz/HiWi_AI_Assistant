@@ -1,0 +1,18 @@
+{
+  "language": "zh",
+  "cv": {
+    "name": "test.txt",
+    "type": "text/plain",
+    "dataUrl": "data:text/plain;base64,Q29tcHV0ZXIgU2NpZW5jZSBzdHVkZW50IHdpdGggUHl0aG9uIGFuZCBUeXBlU2NyaXB0IHNraWxscy4="
+  },
+  "job": {
+    "title": "HiWi Software Development",
+    "url": "https://example.com/job",
+    "text": "Student assistant for TypeScript development, research, testing, and documentation."
+  },
+  "profile": {
+    "background": "Computer Science student",
+    "careerDirection": "Software Engineer",
+    "skillGoals": "Improve TypeScript and research skills"
+  }
+}
