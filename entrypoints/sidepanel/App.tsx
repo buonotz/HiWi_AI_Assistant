@@ -12,7 +12,6 @@ import {
   requestApplicationLetter,
 } from './ai';
 import { getTranslator, Language, TranslationKey } from './i18n';
-import { analyzeJob } from './matching';
 import {
   ApplicationStatus,
   SavedJob,
@@ -41,9 +40,12 @@ type StoredCv = {
 };
 
 type UserProfile = {
-  background: string;
   careerDirection: string;
   skillGoals: string;
+  volunteerExperience: string;
+  projects: string;
+  additionalWorkExperience: string;
+  jobSearchPriority: 'growth' | 'success' | 'balanced';
   cv: StoredCv | null;
 };
 
@@ -52,9 +54,12 @@ const LANGUAGE_KEY = 'displayLanguage';
 const SAVED_JOBS_KEY = 'savedJobs';
 const MAX_CV_SIZE = 3 * 1024 * 1024;
 const EMPTY_PROFILE: UserProfile = {
-  background: '',
   careerDirection: '',
   skillGoals: '',
+  volunteerExperience: '',
+  projects: '',
+  additionalWorkExperience: '',
+  jobSearchPriority: 'balanced',
   cv: null,
 };
 
@@ -410,7 +415,7 @@ function readPage(noTitle: string, noBody: string): PageInfo {
   const materialPattern =
     /cover letter|motivation letter|curriculum vitae|\bCV\b|résumé|resume|academic transcript|transcript|reference|certificate|application document|single PDF|anschreiben|motivationsschreiben|lebenslauf|zeugnis|referenz|bewerbungsunterlagen|申请信|动机信|简历|成绩单|推荐信|证明材料|申请材料/i;
   const explicitApplicationDocumentPattern =
-    /cover letter|motivation letter|curriculum vitae|\bCV\b|résumé|resume|academic transcript|transcript|reference|application document|single PDF|anschreiben|motivationsschreiben|lebenslauf|zeugnis|referenz|bewerbungsunterlagen/i;
+    /cover letter|motivation letter|curriculum vitae|\bCV\b|résumé|resume|academic transcript|transcript|\breferences?\b|application document|single PDF|anschreiben|motivationsschreiben|lebenslauf|zeugnis|\breferenz(?:en)?\b|bewerbungsunterlagen/i;
   const applicationMaterials = unique(
     cleanedText
       .split(/\n+|(?<=[.!?。！？])\s+/)
@@ -515,30 +520,6 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024).toFixed(bytes >= 1024 * 1024 ? 0 : 1)} KB`;
 }
 
-function isJobSectionHeading(paragraph: string) {
-  const normalized = paragraph.trim();
-  if (!normalized || normalized.length > 100) return false;
-  const words = normalized
-    .replace(/[.:]$/, '')
-    .split(/\s+/)
-    .filter(Boolean);
-  const minorWords = /^(?:a|an|and|as|at|but|by|for|from|in|of|on|or|the|to|with)$/i;
-  const titleCaseWords = words.filter(
-    (word) => minorWords.test(word) || /^[A-ZÄÖÜ0-9$#]/.test(word),
-  ).length;
-  const looksLikeStandaloneTitle =
-    words.length <= 14 &&
-    (words.length === 1 || titleCaseWords / words.length >= 0.8) &&
-    !/[!?]$/.test(normalized);
-  return (
-    /^(?:your profile|required qualifications?|additional qualifications?|preferred qualifications?|responsibilities|your tasks|our offer|we offer|what we offer|about (?:the role|you|us)|requirements?|qualifications?|benefits?|aufgaben|ihre aufgaben|dein profil|ihr profil|anforderungen|qualifikationen|wir bieten|unser angebot|was wir bieten|工作职责|岗位职责|你的背景|任职要求|资格要求|加分项|我们提供|岗位要求|职位要求)\s*:?\s*$/i.test(
-      normalized,
-    ) ||
-    (normalized.endsWith(':') && normalized.split(/\s+/).length <= 8) ||
-    looksLikeStandaloneTitle
-  );
-}
-
 function App() {
   const [language, setLanguage] = useState<Language>('zh');
   const t = useMemo(() => getTranslator(language), [language]);
@@ -556,7 +537,9 @@ function App() {
   const [aiResult, setAiResult] = useState<AiAnalysis | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
-  const [letterType, setLetterType] = useState<'cover' | 'motivation'>('cover');
+  const [letterType, setLetterType] = useState<
+    'cover' | 'motivation' | 'introduction-email'
+  >('cover');
   const [selectedExperiences, setSelectedExperiences] = useState<string[]>([]);
   const [letter, setLetter] = useState<ApplicationLetter | null>(null);
   const [letterLoading, setLetterLoading] = useState(false);
@@ -575,11 +558,6 @@ function App() {
         : [],
     [aiResult],
   );
-  const matchResult = useMemo(
-    () => (page ? analyzeJob(page.title, page.text, profile) : null),
-    [page, profile],
-  );
-
   const loadPage = useCallback(async () => {
     setPageLoading(true);
     setPageError('');
@@ -629,7 +607,17 @@ function App() {
         const storedLanguage = result[LANGUAGE_KEY] as Language | undefined;
         const storedJobs = result[SAVED_JOBS_KEY] as SavedJob[] | undefined;
         if (storedProfile) {
-          setProfile({ ...EMPTY_PROFILE, ...storedProfile });
+          setProfile({
+            careerDirection: storedProfile.careerDirection || '',
+            skillGoals: storedProfile.skillGoals || '',
+            volunteerExperience: storedProfile.volunteerExperience || '',
+            projects: storedProfile.projects || '',
+            additionalWorkExperience:
+              storedProfile.additionalWorkExperience || '',
+            jobSearchPriority:
+              storedProfile.jobSearchPriority || 'balanced',
+            cv: storedProfile.cv || null,
+          });
         }
         if (storedLanguage && ['zh', 'en', 'de'].includes(storedLanguage)) {
           setLanguage(storedLanguage);
@@ -651,7 +639,13 @@ function App() {
   };
 
   const updateProfile = (
-    field: 'background' | 'careerDirection' | 'skillGoals',
+    field:
+      | 'careerDirection'
+      | 'skillGoals'
+      | 'volunteerExperience'
+      | 'projects'
+      | 'additionalWorkExperience'
+      | 'jobSearchPriority',
     value: string,
   ) => {
     setProfile((current) => ({ ...current, [field]: value }));
@@ -727,9 +721,12 @@ function App() {
         },
         job: page,
         profile: {
-          background: profile.background,
           careerDirection: profile.careerDirection,
           skillGoals: profile.skillGoals,
+          volunteerExperience: profile.volunteerExperience,
+          projects: profile.projects,
+          additionalWorkExperience: profile.additionalWorkExperience,
+          jobSearchPriority: profile.jobSearchPriority,
         },
       });
       setAiResult(result);
@@ -950,37 +947,12 @@ function App() {
                 <p>{page.title}</p>
               </div>
               <div className="field">
-                <h2>URL</h2>
-                <a href={page.url} target="_blank" rel="noreferrer">
-                  {page.url}
-                </a>
-              </div>
-              <div className="field">
                 <h2>{t('releaseDate')}</h2>
                 <p>{page.releaseDate || t('notFound')}</p>
               </div>
               <div className="field">
                 <h2>{t('applicationDeadline')}</h2>
                 <p>{page.applicationDeadline || t('notFound')}</p>
-              </div>
-              <div className="field content">
-                <h2>{t('body')}</h2>
-                <div className="job-body">
-                  {page.text.split(/\n{2,}/).map((paragraph, index) =>
-                    isJobSectionHeading(paragraph) ? (
-                      <strong
-                        className="job-section-heading"
-                        key={`${paragraph}-${index}`}
-                      >
-                        {paragraph}
-                      </strong>
-                    ) : (
-                      <p key={`${paragraph.slice(0, 40)}-${index}`}>
-                        {paragraph}
-                      </p>
-                    ),
-                  )}
-                </div>
               </div>
               <div className="field">
                 <h2>{t('applicationMaterials')}</h2>
@@ -1080,16 +1052,24 @@ function App() {
           </div>
 
           <div className="field">
-            <label htmlFor="background">{t('background')}</label>
-            <textarea
-              id="background"
-              rows={6}
-              placeholder={t('backgroundPlaceholder')}
-              value={profile.background}
+            <label htmlFor="job-search-priority">
+              {t('jobSearchPriority')}
+            </label>
+            <p className="hint">{t('jobSearchPriorityHint')}</p>
+            <select
+              id="job-search-priority"
+              value={profile.jobSearchPriority}
               onChange={(event) =>
-                updateProfile('background', event.target.value)
+                updateProfile(
+                  'jobSearchPriority',
+                  event.target.value as UserProfile['jobSearchPriority'],
+                )
               }
-            />
+            >
+              <option value="growth">{t('priorityGrowth')}</option>
+              <option value="success">{t('prioritySuccess')}</option>
+              <option value="balanced">{t('priorityBalanced')}</option>
+            </select>
           </div>
 
           <div className="field">
@@ -1125,6 +1105,51 @@ function App() {
               }
             />
           </div>
+
+          <section className="field">
+            <h2>{t('additionalExperience')}</h2>
+            <p className="hint">{t('additionalExperienceHint')}</p>
+
+            <label htmlFor="volunteer-experience">
+              {t('volunteerExperience')}
+            </label>
+            <textarea
+              id="volunteer-experience"
+              rows={4}
+              placeholder={t('volunteerExperiencePlaceholder')}
+              value={profile.volunteerExperience}
+              onChange={(event) =>
+                updateProfile('volunteerExperience', event.target.value)
+              }
+            />
+
+            <label htmlFor="projects">{t('projects')}</label>
+            <textarea
+              id="projects"
+              rows={4}
+              placeholder={t('projectsPlaceholder')}
+              value={profile.projects}
+              onChange={(event) =>
+                updateProfile('projects', event.target.value)
+              }
+            />
+
+            <label htmlFor="additional-work-experience">
+              {t('additionalWorkExperience')}
+            </label>
+            <textarea
+              id="additional-work-experience"
+              rows={4}
+              placeholder={t('additionalWorkExperiencePlaceholder')}
+              value={profile.additionalWorkExperience}
+              onChange={(event) =>
+                updateProfile(
+                  'additionalWorkExperience',
+                  event.target.value,
+                )
+              }
+            />
+          </section>
 
           {profileError && <p className="status error">{profileError}</p>}
           {profileStatus && (
@@ -1168,6 +1193,33 @@ function App() {
                 {t('saveJob')}
               </button>
               {jobStatus && <p className="status success">{jobStatus}</p>}
+
+              <article className="field analysis-detail">
+                {[
+                  [
+                    t('languageRequirements'),
+                    aiResult.job.languageRequirements,
+                  ],
+                  [
+                    t('locationRequirements'),
+                    aiResult.job.locationRequirements,
+                  ],
+                ].map(([label, items]) => (
+                  <div className="detail-group" key={String(label)}>
+                    <strong>{label}</strong>
+                    {(items as string[]).length > 0 ? (
+                      <ul>
+                        {(items as string[]).map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>{t('notFound')}</p>
+                    )}
+                  </div>
+                ))}
+              </article>
+
               <div
                 className={`recommendation recommendation-${aiResult.match.recommendation}`}
               >
@@ -1192,6 +1244,10 @@ function App() {
                   [t('skillsMatch'), aiResult.match.skillScore],
                   [t('majorsMatch'), aiResult.match.majorScore],
                   [t('growthValue'), aiResult.match.growthScore],
+                  [
+                    t('careerDirectionMatch'),
+                    aiResult.match.careerDirectionScore,
+                  ],
                 ].map(([label, score]) => (
                   <article className="score-card" key={label}>
                     <div className="score-heading">
@@ -1204,26 +1260,6 @@ function App() {
                   </article>
                 ))}
               </div>
-
-              <article className="field analysis-detail">
-                <h2>{t('cvSummary')}</h2>
-                <p>{aiResult.cv.summary}</p>
-                {[
-                  [t('education'), aiResult.cv.education],
-                  [t('experience'), aiResult.cv.experience],
-                  [t('extractedSkills'), aiResult.cv.skills],
-                  [t('languages'), aiResult.cv.languages],
-                ].map(([label, items]) => (
-                  <div className="detail-group" key={String(label)}>
-                    <strong>{label}</strong>
-                    <ul>
-                      {(items as string[]).map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </article>
 
               <article className="field analysis-detail">
                 <h2>{t('parsedJob')}</h2>
@@ -1268,91 +1304,6 @@ function App() {
               </article>
             </div>
           )}
-          {!matchResult ? (
-            <div className="field empty-analysis">
-              <h2>{t('noAnalysis')}</h2>
-              <p>{t('noAnalysisHint')}</p>
-              <button type="button" onClick={() => void loadPage()}>
-                {t('readCurrentPage')}
-              </button>
-            </div>
-          ) : (
-            <>
-              <h2 className="section-label">{t('localPrototype')}</h2>
-              <div
-                className={`recommendation recommendation-${matchResult.recommendation}`}
-              >
-                <p>{t('recommendationLevel')}</p>
-                <strong>
-                  {t(
-                    {
-                      strong: 'stronglyRecommended',
-                      recommended: 'recommended',
-                      consider: 'consider',
-                      low: 'lowMatch',
-                    }[matchResult.recommendation] as TranslationKey,
-                  )}
-                </strong>
-                <span>
-                  {t('overallMatch')} {matchResult.overallScore} / 100
-                </span>
-              </div>
-
-              <div className="score-grid">
-                {[matchResult.skills, matchResult.majors, matchResult.growth].map(
-                  (group) => (
-                    <article className="score-card" key={group.type}>
-                      <div className="score-heading">
-                        <h2>
-                          {t(
-                            {
-                              skills: 'skillsMatch',
-                              majors: 'majorsMatch',
-                              growth: 'growthValue',
-                            }[group.type] as TranslationKey,
-                          )}
-                        </h2>
-                        <strong>{group.score}</strong>
-                      </div>
-                      <div
-                        className="score-track"
-                        role="progressbar"
-                        aria-label={group.type}
-                        aria-valuenow={group.score}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                      >
-                        <span style={{ width: `${group.score}%` }} />
-                      </div>
-                      <div className="keywords">
-                        {group.keywords.length > 0 ? (
-                          group.keywords.map((keyword) => (
-                            <span className="keyword" key={keyword}>
-                              {keyword}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="no-keywords">{t('noKeywords')}</span>
-                        )}
-                      </div>
-                    </article>
-                  ),
-                )}
-              </div>
-
-              <p className="prototype-note">
-                {t('prototypeNote')}
-              </p>
-              <button
-                className="save-button"
-                type="button"
-                onClick={() => void loadPage()}
-                disabled={pageLoading}
-              >
-                {pageLoading ? t('analyzing') : t('analyzeAgain')}
-              </button>
-            </>
-          )}
         </section>
       ) : activeView === 'letter' ? (
         <section className="letter-view">
@@ -1372,11 +1323,19 @@ function App() {
                   className="form-select"
                   value={letterType}
                   onChange={(event) =>
-                    setLetterType(event.target.value as 'cover' | 'motivation')
+                    setLetterType(
+                      event.target.value as
+                        | 'cover'
+                        | 'motivation'
+                        | 'introduction-email',
+                    )
                   }
                 >
                   <option value="cover">{t('coverLetter')}</option>
                   <option value="motivation">{t('motivationLetter')}</option>
+                  <option value="introduction-email">
+                    {t('shortIntroductionEmail')}
+                  </option>
                 </select>
               </div>
 

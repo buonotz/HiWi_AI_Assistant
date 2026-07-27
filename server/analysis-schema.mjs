@@ -26,6 +26,8 @@ export const ANALYSIS_SCHEMA = {
         'requiredSkills',
         'preferredMajors',
         'growthSignals',
+        'languageRequirements',
+        'locationRequirements',
       ],
       properties: {
         title: { type: 'string' },
@@ -34,6 +36,8 @@ export const ANALYSIS_SCHEMA = {
         requiredSkills: { type: 'array', items: { type: 'string' } },
         preferredMajors: { type: 'array', items: { type: 'string' } },
         growthSignals: { type: 'array', items: { type: 'string' } },
+        languageRequirements: { type: 'array', items: { type: 'string' } },
+        locationRequirements: { type: 'array', items: { type: 'string' } },
       },
     },
     match: {
@@ -43,6 +47,7 @@ export const ANALYSIS_SCHEMA = {
         'skillScore',
         'majorScore',
         'growthScore',
+        'careerDirectionScore',
         'overallScore',
         'recommendation',
         'strengths',
@@ -54,6 +59,7 @@ export const ANALYSIS_SCHEMA = {
         skillScore: { type: 'integer', minimum: 0, maximum: 100 },
         majorScore: { type: 'integer', minimum: 0, maximum: 100 },
         growthScore: { type: 'integer', minimum: 0, maximum: 100 },
+        careerDirectionScore: { type: 'integer', minimum: 0, maximum: 100 },
         overallScore: { type: 'integer', minimum: 0, maximum: 100 },
         recommendation: {
           type: 'string',
@@ -74,7 +80,10 @@ export const LETTER_SCHEMA = {
   required: ['schemaVersion', 'type', 'subject', 'body'],
   properties: {
     schemaVersion: { type: 'string', enum: ['1.0'] },
-    type: { type: 'string', enum: ['cover', 'motivation'] },
+    type: {
+      type: 'string',
+      enum: ['cover', 'motivation', 'introduction-email'],
+    },
     subject: { type: 'string' },
     body: { type: 'string' },
   },

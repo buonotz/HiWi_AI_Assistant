@@ -13,9 +13,11 @@ export type MatchResult = {
 };
 
 type ProfileForMatching = {
-  background: string;
   careerDirection: string;
   skillGoals: string;
+  volunteerExperience: string;
+  projects: string;
+  additionalWorkExperience: string;
 };
 
 const SKILL_KEYWORDS = [
@@ -105,9 +107,11 @@ export function analyzeJob(
 ): MatchResult {
   const jobText = `${title}\n${text}`;
   const profileText = [
-    profile.background,
     profile.careerDirection,
     profile.skillGoals,
+    profile.volunteerExperience,
+    profile.projects,
+    profile.additionalWorkExperience,
   ].join('\n');
 
   const skillKeywords = extractKeywords(jobText, SKILL_KEYWORDS);

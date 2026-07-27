@@ -69,8 +69,16 @@ async function analyze(body) {
   const prompt = [
     'Analyze the attached CV and job posting.',
     'Extract facts conservatively. Do not invent missing qualifications.',
-    'Score skills fit, field-of-study fit, and growth value from 0 to 100.',
-    'Calculate overallScore as 45% skills, 30% major, and 25% growth, rounded to an integer.',
+    'List the job language requirements separately. Include proficiency levels when stated; return an empty array when none are stated or reliably implied.',
+    'List the job location requirements separately, including city/country, on-site, remote, hybrid, travel, or relocation requirements when stated; return an empty array when none are stated.',
+    'Score skills fit, field-of-study fit, growth value, and career-direction fit from 0 to 100.',
+    'skillScore must use only the candidate demonstrated skills and experience versus the job skill requirements. Ignore career direction and skill-development goals when calculating skillScore.',
+    'majorScore must use only the candidate education, field of study, and academic background versus the job field requirements. Ignore career direction and skill-development goals when calculating majorScore.',
+    'Calculate growthScore from five evidence-based sub-scores, each from 0 to 100: 40% alignment with the user skill-development goals; 20% explicit training, mentoring, or learning opportunities; 10% opportunities for independent ownership, research, or complex work; 10% transferable value for the user future career direction; and 20% expansion of the user current academic or professional knowledge.',
+    'For growthScore, do not treat ordinary routine duties as growth opportunities. Do not infer training, mentoring, advancement, research, autonomy, or complex work unless the job posting supports it. Missing evidence for a sub-score must produce a conservative score.',
+    'careerDirectionScore must compare the user-entered career direction directly with the role, responsibilities, and likely career path. A missing career direction should receive a neutral score of 50.',
+    'The job-search priority changes only the overallScore weighting. It must not change skillScore, majorScore, growthScore, or careerDirectionScore.',
+    'Calculate overallScore according to the user job-search priority: growth means 25% skills, 25% major, 30% growth, and 20% career direction; success means 35% skills, 25% major, 20% growth, and 20% career direction; balanced means 30% skills, 25% major, 25% growth, and 20% career direction. Round to an integer.',
     'Use recommendation strong for >=80, recommended for >=65, consider for >=50, otherwise low.',
     `Write all human-readable fields in ${languageNames[body.language]}.`,
     `Job page URL: ${body.job.url || 'unknown'}`,
@@ -83,9 +91,12 @@ async function analyze(body) {
     `Application instructions: ${(body.job.applicationMethod?.descriptions || []).join('; ') || 'not provided'}`,
     `Required application materials: ${(body.job.applicationMaterials || []).join('; ') || 'not provided'}`,
     `Job posting:\n${body.job.text.slice(0, 100_000)}`,
-    `User-entered background:\n${body.profile?.background || ''}`,
     `Career direction:\n${body.profile?.careerDirection || ''}`,
+    `Job-search priority:\n${body.profile?.jobSearchPriority || 'balanced'}`,
     `Skill goals:\n${body.profile?.skillGoals || ''}`,
+    `Volunteer experience:\n${body.profile?.volunteerExperience || ''}`,
+    `Additional projects:\n${body.profile?.projects || ''}`,
+    `Work experience not listed in the CV:\n${body.profile?.additionalWorkExperience || ''}`,
   ].join('\n\n');
 
   const apiResponse = await fetch('https://api.openai.com/v1/responses', {
@@ -149,7 +160,7 @@ async function generateLetter(body) {
     throw error;
   }
   if (
-    !['cover', 'motivation'].includes(body.type) ||
+    !['cover', 'motivation', 'introduction-email'].includes(body.type) ||
     !['zh', 'en', 'de'].includes(body.language) ||
     !body.job?.title ||
     !Array.isArray(body.focusExperiences) ||
@@ -164,6 +175,8 @@ async function generateLetter(body) {
   const letterNames = {
     cover: 'professional cover letter',
     motivation: 'motivation letter focused on reasons, goals, and development',
+    'introduction-email':
+      'short introduction email for a job application, approximately 100 to 160 words, with a direct subject line, greeting, concise fit statement, and polite closing',
   };
   const prompt = [
     `Write a ${letterNames[body.type]} in ${languageNames[body.language]}.`,
@@ -174,6 +187,8 @@ async function generateLetter(body) {
     `Organization: ${body.job.company || 'not provided'}`,
     `Job responsibilities: ${(body.job.responsibilities || []).join('; ')}`,
     `Required skills: ${(body.job.requiredSkills || []).join('; ')}`,
+    `Language requirements: ${(body.job.languageRequirements || []).join('; ') || 'not provided'}`,
+    `Location requirements: ${(body.job.locationRequirements || []).join('; ') || 'not provided'}`,
     `Selected experiences to emphasize:\n- ${body.focusExperiences.join('\n- ')}`,
     `Match strengths: ${(body.match?.strengths || []).join('; ')}`,
     `Known gaps (do not hide or overstate): ${(body.match?.gaps || []).join('; ')}`,
