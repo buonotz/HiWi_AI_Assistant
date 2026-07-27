@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -16,6 +17,7 @@ import {
   ApplicationStatus,
   SavedJob,
 } from './saved-jobs';
+import { readPdfPage, resolvePdfUrl } from './pdf';
 
 type PageInfo = {
   title: string;
@@ -542,11 +544,13 @@ function App() {
   >('cover');
   const [selectedExperiences, setSelectedExperiences] = useState<string[]>([]);
   const [letter, setLetter] = useState<ApplicationLetter | null>(null);
+  const [letterPageIdentity, setLetterPageIdentity] = useState('');
   const [letterLoading, setLetterLoading] = useState(false);
   const [letterError, setLetterError] = useState('');
   const [copied, setCopied] = useState(false);
   const [savedJobs, setSavedJobs] = useState<SavedJob[]>([]);
   const [jobStatus, setJobStatus] = useState('');
+  const pageIdentityRef = useRef('');
   const experienceOptions = useMemo(
     () =>
       aiResult
@@ -558,6 +562,25 @@ function App() {
         : [],
     [aiResult],
   );
+  const commitPage = useCallback((nextPage: PageInfo) => {
+    const nextIdentity = `${nextPage.url}\n${nextPage.title}\n${nextPage.text}`;
+    if (
+      pageIdentityRef.current &&
+      pageIdentityRef.current !== nextIdentity
+    ) {
+      setAiResult(null);
+      setAiError('');
+      setLetter(null);
+      setLetterPageIdentity('');
+      setLetterError('');
+      setSelectedExperiences([]);
+      setCopied(false);
+      setJobStatus('');
+    }
+    pageIdentityRef.current = nextIdentity;
+    setPage(nextPage);
+  }, []);
+
   const loadPage = useCallback(async () => {
     setPageLoading(true);
     setPageError('');
@@ -572,6 +595,47 @@ function App() {
         throw new Error(t('noActivePage'));
       }
 
+      const directPdfUrl = tab.url ? resolvePdfUrl(tab.url) : null;
+      if (directPdfUrl) {
+        commitPage(
+          await readPdfPage(directPdfUrl, t('noTitle'), t('noBody')),
+        );
+        return;
+      }
+
+      const [embeddedPdfResult] = await browser.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const candidate = document.querySelector(
+            [
+              'embed[type="application/pdf"][src]',
+              'object[type="application/pdf"][data]',
+              'iframe[src*=".pdf" i]',
+              'a[href$=".pdf" i]',
+            ].join(','),
+          );
+          const value =
+            candidate?.getAttribute('src') ||
+            candidate?.getAttribute('data') ||
+            candidate?.getAttribute('href');
+          if (!value) return null;
+          try {
+            return new URL(value, window.location.href).href;
+          } catch {
+            return null;
+          }
+        },
+      });
+      const embeddedPdfUrl = embeddedPdfResult?.result
+        ? resolvePdfUrl(embeddedPdfResult.result)
+        : null;
+      if (embeddedPdfUrl) {
+        commitPage(
+          await readPdfPage(embeddedPdfUrl, t('noTitle'), t('noBody')),
+        );
+        return;
+      }
+
       const [result] = await browser.scripting.executeScript({
         target: { tabId: tab.id },
         func: readPage,
@@ -582,7 +646,7 @@ function App() {
         throw new Error(t('noPageContent'));
       }
 
-      setPage(result.result);
+      commitPage(result.result);
     } catch (reason) {
       setPage(null);
       setPageError(
@@ -593,10 +657,42 @@ function App() {
     } finally {
       setPageLoading(false);
     }
-  }, [t]);
+  }, [commitPage, t]);
 
   useEffect(() => {
     void loadPage();
+  }, [loadPage]);
+
+  useEffect(() => {
+    const pendingReads = new Set<number>();
+    const scheduleRead = (delay = 250) => {
+      const timer = window.setTimeout(() => {
+        pendingReads.delete(timer);
+        void loadPage();
+      }, delay);
+      pendingReads.add(timer);
+    };
+    const handleActivated = () => scheduleRead();
+    const handleUpdated = (
+      _tabId: number,
+      changeInfo: { status?: string; url?: string },
+      tab: { active?: boolean },
+    ) => {
+      if (
+        tab.active &&
+        (changeInfo.status === 'complete' || Boolean(changeInfo.url))
+      ) {
+        scheduleRead(changeInfo.url ? 500 : 150);
+      }
+    };
+
+    browser.tabs.onActivated.addListener(handleActivated);
+    browser.tabs.onUpdated.addListener(handleUpdated);
+    return () => {
+      browser.tabs.onActivated.removeListener(handleActivated);
+      browser.tabs.onUpdated.removeListener(handleUpdated);
+      pendingReads.forEach((timer) => window.clearTimeout(timer));
+    };
   }, [loadPage]);
 
   useEffect(() => {
@@ -711,6 +807,7 @@ function App() {
     }
 
     setAiLoading(true);
+    const analysisPageIdentity = pageIdentityRef.current;
     try {
       const result = await requestAiAnalysis({
         language,
@@ -729,7 +826,9 @@ function App() {
           jobSearchPriority: profile.jobSearchPriority,
         },
       });
-      setAiResult(result);
+      if (analysisPageIdentity === pageIdentityRef.current) {
+        setAiResult(result);
+      }
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '';
       setAiError(
@@ -762,6 +861,7 @@ function App() {
       return;
     }
     setLetterLoading(true);
+    const generationPageIdentity = pageIdentityRef.current;
     try {
       const generatedLetter = await requestApplicationLetter({
           language,
@@ -769,8 +869,10 @@ function App() {
           focusExperiences: selectedExperiences,
           job: aiResult.job,
           match: aiResult.match,
-        });
+      });
+      if (generationPageIdentity !== pageIdentityRef.current) return;
       setLetter(generatedLetter);
+      setLetterPageIdentity(generationPageIdentity);
       if (page) {
         const nextJobs = savedJobs.map((job) =>
           job.url === page.url
@@ -823,6 +925,10 @@ function App() {
     }
     const now = new Date().toISOString();
     const existing = savedJobs.find((job) => job.url === page.url);
+    const currentPageLetter =
+      letter && letterPageIdentity === pageIdentityRef.current
+        ? letter
+        : null;
     const record: SavedJob = {
       id: existing?.id || crypto.randomUUID(),
       url: page.url,
@@ -831,7 +937,7 @@ function App() {
       status: existing?.status || 'saved',
       deadline: existing?.deadline || '',
       analysis: aiResult,
-      letter: letter || existing?.letter || null,
+      letter: currentPageLetter || existing?.letter || null,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
@@ -931,14 +1037,6 @@ function App() {
 
       {activeView === 'page' ? (
         <>
-          <button
-            className="save-button page-read-button"
-            type="button"
-            onClick={() => void loadPage()}
-            disabled={pageLoading}
-          >
-            {pageLoading ? t('loading') : t('readCurrentPage')}
-          </button>
           {pageError && <p className="status error">{pageError}</p>}
           {page && (
             <section aria-live="polite">
